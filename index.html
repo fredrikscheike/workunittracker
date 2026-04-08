@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Daily Work Unit Tracker</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f5f5f4;
+      color: #1c1917;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .app { display: contents; }
+
+    /* ── Sidebar ── */
+    .sidebar {
+      position: fixed;
+      left: 0; top: 0;
+      height: 100vh;
+      width: 188px;
+      background: #ffffff;
+      border-right: 1px solid #e7e5e4;
+      display: flex;
+      flex-direction: column;
+      padding: 28px 16px 24px;
+      transition: width 180ms ease, padding 180ms ease;
+      overflow: hidden;
+      z-index: 10;
+    }
+    .sidebar.collapsed {
+      width: 36px;
+      padding: 28px 0 24px;
+    }
+
+    .sidebar-toggle {
+      position: absolute;
+      top: 28px; right: 10px;
+      background: none; border: none;
+      cursor: pointer;
+      color: #d6d3d1; font-size: 13px; line-height: 1; padding: 2px;
+      transition: color 100ms;
+    }
+    .sidebar.collapsed .sidebar-toggle { right: 8px; }
+    .sidebar-toggle:hover { color: #78716c; }
+
+    .sidebar-content {
+      opacity: 1;
+      transition: opacity 120ms ease;
+      display: flex; flex-direction: column; flex: 1;
+      padding-right: 20px;
+    }
+    .sidebar.collapsed .sidebar-content { opacity: 0; pointer-events: none; }
+
+    .sidebar h2 {
+      font-size: 9px; font-weight: 700;
+      letter-spacing: 0.16em; text-transform: uppercase;
+      color: #c4bfbb; margin-bottom: 10px;
+    }
+
+    /* Column headers */
+    .col-header {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      gap: 6px;
+      padding: 0 7px 4px;
+      border-bottom: 1px solid #f0efee;
+      margin-bottom: 4px;
+    }
+    .col-header span {
+      font-size: 9px; font-weight: 700;
+      letter-spacing: 0.1em; text-transform: uppercase;
+      color: #d6d3d1; text-align: right;
+    }
+    .col-header span:first-child { text-align: left; }
+
+    /* Day rows */
+    .day-list { display: flex; flex-direction: column; gap: 1px; flex: 1; }
+
+    .day-row {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      gap: 6px;
+      align-items: center;
+      padding: 4px 7px;
+      border-radius: 6px;
+    }
+    .day-row.today { background: #f5f5f4; }
+
+    .day-name {
+      font-size: 11px; font-weight: 500; color: #a8a29e;
+    }
+    .day-row.today .day-name { color: #1c1917; font-weight: 600; }
+
+    .day-val {
+      font-size: 11px; font-variant-numeric: tabular-nums;
+      color: #d6d3d1; text-align: right; min-width: 22px;
+    }
+    .day-val.has-data { color: #78716c; }
+    .day-row.today .day-val { color: #a8a29e; }
+    .day-row.today .day-val.has-data { color: #57534e; font-weight: 600; }
+
+    .sidebar-divider {
+      border: none; border-top: 1px solid #f0efee; margin: 8px 0;
+    }
+
+    .week-row {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      gap: 6px;
+      align-items: center;
+      padding: 4px 7px;
+    }
+    .week-label {
+      font-size: 10px; font-weight: 700;
+      letter-spacing: 0.06em; text-transform: uppercase; color: #a8a29e;
+    }
+    .week-val {
+      font-size: 13px; font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      color: #57534e; text-align: right; min-width: 22px;
+    }
+
+    /* ── Main ── */
+    .main {
+      flex: 1; display: flex;
+      align-items: center; justify-content: center;
+      padding: 40px 24px;
+    }
+
+    .wrapper {
+      display: flex; flex-direction: column;
+      align-items: center; gap: 14px;
+      user-select: none;
+    }
+
+    .header { text-align: center; }
+    .header h1 {
+      font-size: 9px; font-weight: 600;
+      letter-spacing: 0.18em; text-transform: uppercase; color: #a8a29e;
+    }
+    .header p { font-size: 9px; color: #d6d3d1; margin-top: 2px; }
+
+    .total-units { text-align: center; line-height: 1; }
+    .total-units .number {
+      font-size: 48px; font-weight: 800;
+      letter-spacing: -2px; color: #1c1917;
+      font-variant-numeric: tabular-nums;
+    }
+    .total-units .label { font-size: 10px; color: #a8a29e; margin-top: 4px; }
+
+    .buttons { display: flex; gap: 10px; }
+
+    .call-btn {
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      width: 84px; height: 84px;
+      border-radius: 10px; border: none; cursor: pointer; gap: 3px;
+      transition: transform 80ms ease, box-shadow 80ms ease;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 4px 12px rgba(0,0,0,0.06);
+    }
+    .call-btn:active { transform: scale(0.93); box-shadow: 0 1px 2px rgba(0,0,0,0.06); }
+
+    .btn-r { background: #d1fae5; color: #065f46; }
+    .btn-r:hover { background: #a7f3d0; }
+    .btn-f { background: #dbeafe; color: #1e3a8a; }
+    .btn-f:hover { background: #bfdbfe; }
+    .btn-t { background: #fef3c7; color: #92400e; }
+    .btn-t:hover { background: #fde68a; }
+
+    .btn-key { font-size: 26px; font-weight: 900; line-height: 1; }
+    .btn-label { font-size: 9px; font-weight: 600; letter-spacing: 0.04em; opacity: 0.7; }
+    .btn-value { font-size: 9px; opacity: 0.5; }
+
+    /* Breakdown */
+    .breakdown { display: flex; align-items: center; gap: 10px; text-align: center; }
+    .stat .count { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .stat .name { font-size: 9px; color: #a8a29e; margin-top: 2px; }
+    .stat-r .count { color: #059669; }
+    .stat-f .count { color: #2563eb; }
+    .stat-t .count { color: #d97706; }
+    .stat-total .count { color: #57534e; }
+    .sep { font-size: 13px; color: #d6d3d1; }
+
+    /* Action buttons */
+    .action-btns { display: flex; gap: 8px; }
+    .undo-btn, .reset-btn {
+      background: none; border: 1px solid #e7e5e4;
+      border-radius: 7px; padding: 4px 12px;
+      font-size: 10px; cursor: pointer;
+      transition: border-color 100ms, color 100ms;
+      font-family: inherit;
+    }
+    .undo-btn { color: #a8a29e; }
+    .undo-btn:hover:not(:disabled) { border-color: #a8a29e; color: #57534e; }
+    .undo-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+    .reset-btn { color: #fca5a5; border-color: #fecaca; }
+    .reset-btn:hover { border-color: #f87171; color: #ef4444; }
+
+    .footer { font-size: 10px; color: #d6d3d1; text-align: center; line-height: 1.7; }
+    kbd {
+      background: #e7e5e4; color: #78716c;
+      border-radius: 3px; padding: 1px 5px;
+      font-family: inherit; font-size: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    const TZ          = 'Europe/Madrid';
+    const STORAGE_KEY = 'workUnitTracker_v3';
+    const HISTORY_KEY = 'workUnitHistory_v3';
+
+    /* ── Date helpers ── */
+    function getCETDate() {
+      return new Intl.DateTimeFormat('en-CA', {
+        timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit'
+      }).format(new Date());
+    }
+
+    function getWeekMonday(dateStr) {
+      const d = new Date(dateStr + 'T12:00:00');
+      const dow = d.getDay();
+      const diff = dow === 0 ? -6 : 1 - dow;
+      d.setDate(d.getDate() + diff);
+      return d.toISOString().slice(0, 10);
+    }
+
+    function getWeekDays(dateStr) {
+      const monday = new Date(getWeekMonday(dateStr) + 'T12:00:00');
+      return Array.from({ length: 7 }, (_, i) => {
+        const d = new Date(monday);
+        d.setDate(monday.getDate() + i);
+        return d.toISOString().slice(0, 10);
+      });
+    }
+
+    const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+    /* ── Storage ── */
+    function freshState(date) {
+      return { date, renewalCalls: 0, otherCalls: 0, taskCount: 0, log: [] };
+    }
+
+    function getInitialState() {
+      try {
+        const today = getCETDate();
+        const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
+        if (stored && stored.date === today) return { ...freshState(today), ...stored };
+        return freshState(today);
+      } catch { return freshState(getCETDate()); }
+    }
+
+    function loadHistory() {
+      try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '{}'); }
+      catch { return {}; }
+    }
+
+    // history[date] = { units, tasks }
+    function save(state) {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        const history = loadHistory();
+        history[state.date] = {
+          units: state.renewalCalls + state.otherCalls * 0.5,
+          tasks: state.taskCount
+        };
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+      } catch {}
+    }
+
+    function fmt(n) {
+      return n % 1 === 0 ? String(n) : n.toFixed(1);
+    }
+
+    /* ── Sidebar ── */
+    function Sidebar({ today, todayUnits, todayTasks, sidebarOpen, onToggle }) {
+      const [history, setHistory] = useState(loadHistory);
+
+      useEffect(() => {
+        setHistory(loadHistory());
+      }, [todayUnits, todayTasks, sidebarOpen, today]);
+
+      const weekDays = getWeekDays(today);
+
+      let weekUnits = 0, weekTasks = 0;
+      weekDays.forEach(d => {
+        if (d === today) { weekUnits += todayUnits; weekTasks += todayTasks; }
+        else { const h = history[d]; if (h) { weekUnits += h.units || 0; weekTasks += h.tasks || 0; } }
+      });
+
+      return (
+        <div className={`sidebar${sidebarOpen ? '' : ' collapsed'}`}>
+          <button className="sidebar-toggle" onClick={onToggle} title={sidebarOpen ? 'Hide' : 'Show'}>
+            {sidebarOpen ? '◀' : '▶'}
+          </button>
+          <div className="sidebar-content">
+            <h2>This week</h2>
+            <div className="col-header">
+              <span></span>
+              <span>U</span>
+              <span>T</span>
+            </div>
+            <div className="day-list">
+              {weekDays.map((d, i) => {
+                const isToday = d === today;
+                const h = history[d] || {};
+                const units = isToday ? todayUnits : (h.units || 0);
+                const tasks = isToday ? todayTasks : (h.tasks || 0);
+                return (
+                  <div key={d} className={`day-row${isToday ? ' today' : ''}`}>
+                    <span className="day-name">{DAY_NAMES[i]}</span>
+                    <span className={`day-val${units > 0 ? ' has-data' : ''}`}>{fmt(units)}</span>
+                    <span className={`day-val${tasks > 0 ? ' has-data' : ''}`}>{tasks}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <hr className="sidebar-divider" />
+            <div className="week-row">
+              <span className="week-label">Week</span>
+              <span className="week-val">{fmt(weekUnits)}</span>
+              <span className="week-val">{weekTasks}</span>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    /* ── App ── */
+    function App() {
+      const [state, setState] = useState(getInitialState);
+      const [sidebarOpen, setSidebarOpen] = useState(true);
+
+      const totalUnits = state.renewalCalls + state.otherCalls * 0.5;
+      const totalCalls = state.renewalCalls + state.otherCalls;
+
+      function addRenewal() {
+        setState(prev => { const next = { ...prev, renewalCalls: prev.renewalCalls + 1, log: [...(prev.log||[]), 'R'] }; save(next); return next; });
+      }
+      function addOther() {
+        setState(prev => { const next = { ...prev, otherCalls: prev.otherCalls + 1, log: [...(prev.log||[]), 'F'] }; save(next); return next; });
+      }
+      function addTask() {
+        setState(prev => { const next = { ...prev, taskCount: prev.taskCount + 1, log: [...(prev.log||[]), 'T'] }; save(next); return next; });
+      }
+
+      function undoLast() {
+        setState(prev => {
+          const log = prev.log || [];
+          if (!log.length) return prev;
+          const last = log[log.length - 1];
+          const next = {
+            ...prev,
+            renewalCalls: last === 'R' ? Math.max(0, prev.renewalCalls - 1) : prev.renewalCalls,
+            otherCalls:   last === 'F' ? Math.max(0, prev.otherCalls - 1)   : prev.otherCalls,
+            taskCount:    last === 'T' ? Math.max(0, prev.taskCount - 1)    : prev.taskCount,
+            log: log.slice(0, -1)
+          };
+          save(next); return next;
+        });
+      }
+
+      function resetDay() {
+        const next = freshState(state.date);
+        save(next); setState(next);
+      }
+
+      useEffect(() => {
+        function handler(e) {
+          if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+          if (e.key === 'r' || e.key === 'R') addRenewal();
+          if (e.key === 'f' || e.key === 'F') addOther();
+          if (e.key === 't' || e.key === 'T') addTask();
+          if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); undoLast(); }
+        }
+        window.addEventListener('keydown', handler);
+        return () => window.removeEventListener('keydown', handler);
+      }, []);
+
+      useEffect(() => {
+        const id = setInterval(() => {
+          const today = getCETDate();
+          setState(prev => {
+            if (prev.date === today) return prev;
+            const d = new Date(today + 'T12:00:00');
+            if (d.getDay() === 1) localStorage.removeItem(HISTORY_KEY);
+            const next = freshState(today);
+            save(next); return next;
+          });
+        }, 60000);
+        return () => clearInterval(id);
+      }, []);
+
+      const canUndo = !!(state.log && state.log.length);
+
+      return (
+        <div className="app">
+          <Sidebar
+            today={state.date}
+            todayUnits={totalUnits}
+            todayTasks={state.taskCount}
+            sidebarOpen={sidebarOpen}
+            onToggle={() => setSidebarOpen(o => !o)}
+          />
+          <div className="main">
+            <div className="wrapper">
+              <div className="header">
+                <h1>Work Units</h1>
+                <p>{state.date} · CET</p>
+              </div>
+
+              <div className="total-units">
+                <div className="number">{fmt(totalUnits)}</div>
+                <div className="label">units today</div>
+              </div>
+
+              <div className="buttons">
+                <button className="call-btn btn-r" onClick={addRenewal}>
+                  <span className="btn-key">R</span>
+                  <span className="btn-label">Renewal</span>
+                  <span className="btn-value">1 unit</span>
+                </button>
+                <button className="call-btn btn-f" onClick={addOther}>
+                  <span className="btn-key">F</span>
+                  <span className="btn-label">Other Call</span>
+                  <span className="btn-value">0.5 units</span>
+                </button>
+                <button className="call-btn btn-t" onClick={addTask}>
+                  <span className="btn-key">T</span>
+                  <span className="btn-label">Task</span>
+                  <span className="btn-value">count only</span>
+                </button>
+              </div>
+
+              <div className="breakdown">
+                <div className="stat stat-r">
+                  <div className="count">{state.renewalCalls}</div>
+                  <div className="name">Renewal</div>
+                </div>
+                <div className="sep">+</div>
+                <div className="stat stat-f">
+                  <div className="count">{state.otherCalls}</div>
+                  <div className="name">Other</div>
+                </div>
+                <div className="sep">=</div>
+                <div className="stat stat-total">
+                  <div className="count">{totalCalls}</div>
+                  <div className="name">Calls</div>
+                </div>
+                <div className="sep">·</div>
+                <div className="stat stat-t">
+                  <div className="count">{state.taskCount}</div>
+                  <div className="name">Tasks</div>
+                </div>
+              </div>
+
+              <div className="action-btns">
+                <button className="undo-btn" onClick={undoLast} disabled={!canUndo}>
+                  Undo last · Ctrl+Z
+                </button>
+                <button className="reset-btn" onClick={resetDay}>
+                  Reset day
+                </button>
+              </div>
+
+              <div className="footer">
+                Press <kbd>R</kbd> <kbd>F</kbd> <kbd>T</kbd> to log · resets at midnight CET
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
