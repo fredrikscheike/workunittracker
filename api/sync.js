@@ -51,11 +51,12 @@ function buildOtherCallQuery(userId, start, end) {
 }
 
 function buildTaskQuery(userId, start, end) {
-  // Tasks: any non-call, Status=Completed, not Task_Not_Relevant__c,
+  // Tasks: only genuine task subtypes (excludes auto-logged emails/calls),
+  // Status=Completed, not Task_Not_Relevant__c,
   // completed within today CET (using UTC bounds on CompletedDateTime)
   return `SELECT COUNT() FROM Task
     WHERE OwnerId = '${userId}'
-    AND Type != 'Call'
+    AND TaskSubtype = 'Task'
     AND Status = 'Completed'
     AND Task_Not_Relevant__c = false
     AND CompletedDateTime >= ${start}
