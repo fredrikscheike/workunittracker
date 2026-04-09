@@ -86,8 +86,8 @@ function getCETDayBoundsUTC() {
 
   // SOQL datetime literals require format: 2026-04-09T00:00:00Z
   return {
-    start: startUTC.toISOString().replace('.000Z', '+00:00'),
-    end:   endUTC.toISOString().replace('.000Z', '+00:00'),
+    start: startUTC.toISOString().slice(0, 19) + 'Z',
+    end:   endUTC.toISOString().slice(0, 19) + 'Z',
   };
 }
 
