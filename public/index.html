@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Work Unit Tracker</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --mint:    #c8f0e0;
+      --sky:     #c5dff8;
+      --butter:  #fdefc3;
+      --rose:    #fdd5d5;
+      --lavender:#e0d7f8;
+      --stone:   #f7f6f4;
+      --ink:     #1a1a2e;
+      --muted:   #9b97a8;
+      --border:  #ece9f1;
+      --white:   #ffffff;
+      --sidebar-w: 172px;
+      --radius:  16px;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'DM Sans', system-ui, sans-serif;
+      background: var(--stone);
+      color: var(--ink);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .app { display: contents; }
+
+    /* ── Sidebar ─────────────────────────────────── */
+    .sidebar {
+      position: fixed;
+      left: 0; top: 0;
+      height: 100vh;
+      width: var(--sidebar-w);
+      background: var(--white);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      padding: 24px 14px 20px;
+      transition: width 200ms cubic-bezier(.4,0,.2,1),
+                  padding 200ms cubic-bezier(.4,0,.2,1);
+      overflow: hidden;
+      z-index: 10;
+    }
+    .sidebar.collapsed {
+      width: 34px;
+      padding: 24px 0 20px;
+    }
+
+    .sidebar-toggle {
+      position: absolute;
+      top: 24px; right: 8px;
+      background: none; border: none;
+      cursor: pointer;
+      width: 20px; height: 20px;
+      display: flex; align-items: center; justify-content: center;
+      color: var(--muted);
+      font-size: 10px;
+      border-radius: 6px;
+      transition: background 100ms, color 100ms;
+    }
+    .sidebar-toggle:hover { background: var(--stone); color: var(--ink); }
+
+    .sidebar-inner {
+      opacity: 1;
+      transition: opacity 150ms ease;
+      display: flex; flex-direction: column; flex: 1;
+      padding-right: 16px;
+      overflow: hidden;
+    }
+    .sidebar.collapsed .sidebar-inner { opacity: 0; pointer-events: none; }
+
+    .sidebar-title {
+      font-size: 9px; font-weight: 600;
+      letter-spacing: 0.14em; text-transform: uppercase;
+      color: var(--muted); margin-bottom: 12px;
+      white-space: nowrap;
+    }
+
+    .col-heads {
+      display: grid;
+      grid-template-columns: 1fr 36px 30px;
+      padding: 0 6px 6px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 4px;
+    }
+    .col-heads span {
+      font-size: 9px; font-weight: 600;
+      letter-spacing: 0.1em; text-transform: uppercase;
+      color: var(--border); text-align: right;
+    }
+    .col-heads span:first-child { text-align: left; }
+
+    .day-list { display: flex; flex-direction: column; gap: 1px; flex: 1; }
+
+    .day-row {
+      display: grid;
+      grid-template-columns: 1fr 36px 30px;
+      align-items: center;
+      padding: 5px 6px;
+      border-radius: 8px;
+      transition: background 100ms;
+    }
+    .day-row.today { background: var(--stone); }
+
+    .day-name {
+      font-size: 11px; font-weight: 500;
+      color: var(--muted); white-space: nowrap;
+    }
+    .day-row.today .day-name { color: var(--ink); font-weight: 600; }
+
+    .day-val {
+      font-size: 11px; font-family: 'DM Mono', monospace;
+      color: var(--border); text-align: right;
+      transition: color 200ms;
+    }
+    .day-val.lit { color: var(--muted); }
+    .day-row.today .day-val.lit { color: var(--ink); font-weight: 500; }
+
+    .sidebar-rule {
+      border: none; border-top: 1px solid var(--border);
+      margin: 8px 0;
+    }
+
+    .week-row {
+      display: grid;
+      grid-template-columns: 1fr 36px 30px;
+      align-items: center;
+      padding: 4px 6px;
+    }
+    .week-label {
+      font-size: 10px; font-weight: 700;
+      letter-spacing: 0.08em; text-transform: uppercase;
+      color: var(--muted);
+    }
+    .week-val {
+      font-size: 12px; font-family: 'DM Mono', monospace;
+      font-weight: 500; color: var(--ink); text-align: right;
+    }
+
+    /* ── Main ────────────────────────────────────── */
+    .main {
+      display: flex; align-items: center; justify-content: center;
+      padding: 40px 24px; min-height: 100vh;
+    }
+
+    .card {
+      background: var(--white);
+      border-radius: 28px;
+      padding: 36px 32px;
+      display: flex; flex-direction: column; align-items: center;
+      gap: 22px;
+      box-shadow: 0 2px 8px rgba(26,26,46,.04), 0 8px 32px rgba(26,26,46,.06);
+      width: 380px;
+      user-select: none;
+    }
+
+    /* ── Header ── */
+    .card-header {
+      width: 100%;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .card-title {
+      font-size: 11px; font-weight: 600;
+      letter-spacing: 0.14em; text-transform: uppercase;
+      color: var(--muted);
+    }
+    .date-badge {
+      font-size: 10px; font-family: 'DM Mono', monospace;
+      color: var(--muted);
+      background: var(--stone);
+      padding: 3px 8px; border-radius: 20px;
+    }
+
+    /* ── Total ── */
+    .total-wrap { text-align: center; line-height: 1; }
+    .total-num {
+      font-size: 72px; font-weight: 700;
+      letter-spacing: -4px; color: var(--ink);
+      font-variant-numeric: tabular-nums;
+    }
+    .total-label {
+      font-size: 11px; color: var(--muted);
+      margin-top: 6px; letter-spacing: 0.04em;
+    }
+
+    /* ── Buttons ── */
+    .btn-row { display: flex; gap: 12px; }
+
+    .clk-btn {
+      flex: 1;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 5px;
+      padding: 18px 12px;
+      border: none; border-radius: var(--radius);
+      cursor: pointer;
+      transition: transform 80ms ease, filter 80ms ease;
+    }
+    .clk-btn:active { transform: scale(0.92); filter: brightness(.95); }
+
+    .btn-r  { background: var(--mint); }
+    .btn-f  { background: var(--sky); }
+    .btn-t  { background: var(--butter); }
+
+    .btn-letter {
+      font-size: 30px; font-weight: 800; line-height: 1;
+    }
+    .btn-r  .btn-letter { color: #1a7a52; }
+    .btn-f  .btn-letter { color: #1a5fa0; }
+    .btn-t  .btn-letter { color: #a07a10; }
+
+    .btn-name {
+      font-size: 10px; font-weight: 600;
+      letter-spacing: 0.04em; opacity: 0.65;
+    }
+    .btn-r  .btn-name { color: #1a7a52; }
+    .btn-f  .btn-name { color: #1a5fa0; }
+    .btn-t  .btn-name { color: #a07a10; }
+
+    .btn-unit {
+      font-size: 9px; opacity: 0.45;
+    }
+    .btn-r  .btn-unit { color: #1a7a52; }
+    .btn-f  .btn-unit { color: #1a5fa0; }
+    .btn-t  .btn-unit { color: #a07a10; }
+
+    /* ── Breakdown ── */
+    .breakdown {
+      display: flex; align-items: center;
+      gap: 10px; width: 100%;
+      padding: 14px 16px;
+      background: var(--stone);
+      border-radius: 12px;
+    }
+    .bk-stat { flex: 1; text-align: center; }
+    .bk-count {
+      font-size: 22px; font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+    .bk-r .bk-count { color: #1a7a52; }
+    .bk-f .bk-count { color: #1a5fa0; }
+    .bk-t .bk-count { color: #a07a10; }
+    .bk-total .bk-count { color: var(--ink); }
+    .bk-label {
+      font-size: 9px; font-weight: 600;
+      letter-spacing: 0.08em; text-transform: uppercase;
+      color: var(--muted); margin-top: 2px;
+    }
+    .bk-sep { font-size: 14px; color: var(--border); flex-shrink: 0; }
+
+    /* ── Action buttons ── */
+    .actions { display: flex; gap: 8px; }
+
+    .act-btn {
+      background: none;
+      border: 1.5px solid var(--border);
+      border-radius: 10px;
+      padding: 6px 14px;
+      font-size: 11px; font-family: 'DM Sans', sans-serif;
+      font-weight: 500;
+      cursor: pointer;
+      color: var(--muted);
+      transition: border-color 120ms, color 120ms, background 120ms;
+    }
+    .act-btn:hover:not(:disabled) {
+      border-color: var(--muted); color: var(--ink);
+    }
+    .act-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+    .act-btn.danger { color: #e07a7a; border-color: var(--rose); }
+    .act-btn.danger:hover { background: var(--rose); border-color: #e07a7a; color: #c04040; }
+
+    /* ── Sync strip ── */
+    .sync-strip {
+      width: 100%;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 14px;
+      border-radius: 12px;
+      border: 1.5px solid var(--border);
+    }
+
+    .sync-user {
+      display: flex; align-items: center; gap: 8px;
+    }
+    .sync-dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--mint);
+      flex-shrink: 0;
+    }
+    .sync-dot.offline { background: var(--border); }
+    .sync-name {
+      font-size: 11px; font-weight: 500; color: var(--ink);
+    }
+    .sync-time {
+      font-size: 10px; color: var(--muted); font-family: 'DM Mono', monospace;
+    }
+
+    .sync-btn {
+      background: var(--lavender);
+      border: none; border-radius: 8px;
+      padding: 5px 12px;
+      font-size: 10px; font-weight: 600;
+      font-family: 'DM Sans', sans-serif;
+      color: #5a3fa0; cursor: pointer;
+      transition: filter 100ms;
+    }
+    .sync-btn:hover { filter: brightness(.95); }
+    .sync-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .connect-btn {
+      background: var(--lavender);
+      border: none; border-radius: 8px;
+      padding: 6px 14px;
+      font-size: 11px; font-weight: 600;
+      font-family: 'DM Sans', sans-serif;
+      color: #5a3fa0; cursor: pointer;
+      transition: filter 100ms;
+      text-decoration: none; display: inline-block;
+    }
+    .connect-btn:hover { filter: brightness(.95); }
+
+    /* ── Footer hint ── */
+    .hint {
+      font-size: 10px; color: var(--border);
+      letter-spacing: 0.02em;
+    }
+    kbd {
+      background: var(--stone);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 1px 5px;
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      color: var(--muted);
+    }
+
+    /* ── Spinner ── */
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner {
+      display: inline-block;
+      width: 10px; height: 10px;
+      border: 2px solid var(--lavender);
+      border-top-color: #5a3fa0;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      vertical-align: middle;
+      margin-right: 4px;
+    }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+  const { useState, useEffect, useCallback } = React;
+
+  const TZ          = 'Europe/Madrid';
+  const STORAGE_KEY = 'wut_v4';
+  const HISTORY_KEY = 'wut_hist_v4';
+  const SYNC_MS     = 5 * 60 * 1000; // auto-sync every 5 min
+
+  /* ── helpers ── */
+  function getCETDate() {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(new Date());
+  }
+
+  function getWeekDays(dateStr) {
+    const d = new Date(dateStr + 'T12:00:00');
+    const dow = d.getDay();
+    const monday = new Date(d);
+    monday.setDate(d.getDate() - (dow === 0 ? 6 : dow - 1));
+    return Array.from({ length: 7 }, (_, i) => {
+      const dd = new Date(monday);
+      dd.setDate(monday.getDate() + i);
+      return dd.toISOString().slice(0, 10);
+    });
+  }
+
+  const DAY = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+
+  function fmt(n) { return n % 1 === 0 ? String(n) : n.toFixed(1); }
+
+  function freshDay(date) {
+    return { date, renewalCalls: 0, otherCalls: 0, taskCount: 0, log: [] };
+  }
+
+  function loadDay() {
+    try {
+      const today = getCETDate();
+      const s = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
+      if (s && s.date === today) return { ...freshDay(today), ...s };
+      return freshDay(today);
+    } catch { return freshDay(getCETDate()); }
+  }
+
+  function loadHist() {
+    try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '{}'); }
+    catch { return {}; }
+  }
+
+  function saveDay(state) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      const h = loadHist();
+      h[state.date] = {
+        units: state.renewalCalls + state.otherCalls * 0.5,
+        tasks: state.taskCount,
+      };
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(h));
+    } catch {}
+  }
+
+  function fmtTime(iso) {
+    if (!iso) return null;
+    return new Intl.DateTimeFormat('en-GB', {
+      timeZone: TZ, hour: '2-digit', minute: '2-digit',
+    }).format(new Date(iso));
+  }
+
+  /* ── Sidebar ── */
+  function Sidebar({ today, todayUnits, todayTasks, open, onToggle }) {
+    const [hist, setHist] = useState(loadHist);
+    useEffect(() => { setHist(loadHist()); }, [todayUnits, todayTasks, open, today]);
+
+    const days = getWeekDays(today);
+    let wUnits = 0, wTasks = 0;
+    days.forEach(d => {
+      if (d === today) { wUnits += todayUnits; wTasks += todayTasks; }
+      else { const h = hist[d] || {}; wUnits += h.units || 0; wTasks += h.tasks || 0; }
+    });
+
+    return (
+      <div className={`sidebar${open ? '' : ' collapsed'}`}>
+        <button className="sidebar-toggle" onClick={onToggle}>{open ? '◀' : '▶'}</button>
+        <div className="sidebar-inner">
+          <div className="sidebar-title">This week</div>
+          <div className="col-heads">
+            <span></span><span>U</span><span>T</span>
+          </div>
+          <div className="day-list">
+            {days.map((d, i) => {
+              const isToday = d === today;
+              const h = hist[d] || {};
+              const u = isToday ? todayUnits : (h.units || 0);
+              const t = isToday ? todayTasks : (h.tasks || 0);
+              return (
+                <div key={d} className={`day-row${isToday ? ' today' : ''}`}>
+                  <span className="day-name">{DAY[i]}</span>
+                  <span className={`day-val${u > 0 ? ' lit' : ''}`}>{fmt(u)}</span>
+                  <span className={`day-val${t > 0 ? ' lit' : ''}`}>{t}</span>
+                </div>
+              );
+            })}
+          </div>
+          <hr className="sidebar-rule" />
+          <div className="week-row">
+            <span className="week-label">Week</span>
+            <span className="week-val">{fmt(wUnits)}</span>
+            <span className="week-val">{wTasks}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  /* ── SyncStrip ── */
+  function SyncStrip({ onSyncComplete }) {
+    const [user, setUser]       = useState(null);       // { name, email } | null | 'loading'
+    const [syncing, setSyncing] = useState(false);
+    const [lastSync, setLastSync] = useState(null);
+
+    const checkAuth = useCallback(async () => {
+      setUser('loading');
+      try {
+        const res = await fetch('/api/me');
+        if (res.ok) {
+          const data = await res.json();
+          setUser(data.authenticated ? data : null);
+        } else {
+          setUser(null);
+        }
+      } catch { setUser(null); }
+    }, []);
+
+    const doSync = useCallback(async () => {
+      setSyncing(true);
+      try {
+        const res = await fetch('/api/sync');
+        if (res.ok) {
+          const data = await res.json();
+          setLastSync(data.syncedAt);
+          onSyncComplete(data);
+        }
+      } catch {}
+      setSyncing(false);
+    }, [onSyncComplete]);
+
+    // Check auth on mount
+    useEffect(() => { checkAuth(); }, []);
+
+    // Auto-sync every 5 min when authenticated
+    useEffect(() => {
+      if (!user || user === 'loading') return;
+      doSync();
+      const id = setInterval(doSync, SYNC_MS);
+      return () => clearInterval(id);
+    }, [user]);
+
+    if (user === 'loading') {
+      return (
+        <div className="sync-strip">
+          <span className="hint" style={{color:'var(--muted)'}}>
+            <span className="spinner"></span>Connecting…
+          </span>
+        </div>
+      );
+    }
+
+    if (!user) {
+      return (
+        <div className="sync-strip">
+          <div>
+            <div className="sync-name" style={{fontSize:11,color:'var(--muted)'}}>Salesforce sync</div>
+            <div className="sync-time">Not connected</div>
+          </div>
+          <a className="connect-btn" href="/api/auth/login">Connect ↗</a>
+        </div>
+      );
+    }
+
+    return (
+      <div className="sync-strip">
+        <div className="sync-user">
+          <div className="sync-dot"></div>
+          <div>
+            <div className="sync-name">{user.name || user.email}</div>
+            <div className="sync-time">
+              {lastSync ? `Synced ${fmtTime(lastSync)}` : 'Syncing…'}
+            </div>
+          </div>
+        </div>
+        <button className="sync-btn" onClick={doSync} disabled={syncing}>
+          {syncing ? <><span className="spinner"></span>Syncing</> : '↻ Sync'}
+        </button>
+      </div>
+    );
+  }
+
+  /* ── App ── */
+  function App() {
+    const [state, setState] = useState(loadDay);
+    const [sidebarOpen, setSidebarOpen] = useState(true);
+
+    const totalUnits = state.renewalCalls + state.otherCalls * 0.5;
+    const totalCalls = state.renewalCalls + state.otherCalls;
+
+    function add(type) {
+      setState(prev => {
+        const next = {
+          ...prev,
+          renewalCalls: type === 'R' ? prev.renewalCalls + 1 : prev.renewalCalls,
+          otherCalls:   type === 'F' ? prev.otherCalls + 1   : prev.otherCalls,
+          taskCount:    type === 'T' ? prev.taskCount + 1     : prev.taskCount,
+          log: [...(prev.log || []), type],
+        };
+        saveDay(next); return next;
+      });
+    }
+
+    function undo() {
+      setState(prev => {
+        const log = prev.log || [];
+        if (!log.length) return prev;
+        const last = log[log.length - 1];
+        const next = {
+          ...prev,
+          renewalCalls: last === 'R' ? Math.max(0, prev.renewalCalls - 1) : prev.renewalCalls,
+          otherCalls:   last === 'F' ? Math.max(0, prev.otherCalls - 1)   : prev.otherCalls,
+          taskCount:    last === 'T' ? Math.max(0, prev.taskCount - 1)     : prev.taskCount,
+          log: log.slice(0, -1),
+        };
+        saveDay(next); return next;
+      });
+    }
+
+    function reset() {
+      const next = freshDay(state.date);
+      saveDay(next); setState(next);
+    }
+
+    // Overwrite local counts with SF data
+    const handleSyncComplete = useCallback((data) => {
+      setState(prev => {
+        const next = {
+          ...prev,
+          renewalCalls: data.renewalCalls ?? prev.renewalCalls,
+          otherCalls:   data.otherCalls   ?? prev.otherCalls,
+          taskCount:    data.tasks        ?? prev.taskCount,
+        };
+        saveDay(next); return next;
+      });
+    }, []);
+
+    // Keyboard shortcuts
+    useEffect(() => {
+      function onKey(e) {
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+        if (e.key === 'r' || e.key === 'R') add('R');
+        if (e.key === 'f' || e.key === 'F') add('F');
+        if (e.key === 't' || e.key === 'T') add('T');
+        if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); undo(); }
+      }
+      window.addEventListener('keydown', onKey);
+      return () => window.removeEventListener('keydown', onKey);
+    }, []);
+
+    // Midnight reset (CET)
+    useEffect(() => {
+      const id = setInterval(() => {
+        const today = getCETDate();
+        setState(prev => {
+          if (prev.date === today) return prev;
+          const d = new Date(today + 'T12:00:00');
+          if (d.getDay() === 1) localStorage.removeItem(HISTORY_KEY);
+          const next = freshDay(today);
+          saveDay(next); return next;
+        });
+      }, 60000);
+      return () => clearInterval(id);
+    }, []);
+
+    const canUndo = !!(state.log && state.log.length);
+
+    return (
+      <div className="app">
+        <Sidebar
+          today={state.date}
+          todayUnits={totalUnits}
+          todayTasks={state.taskCount}
+          open={sidebarOpen}
+          onToggle={() => setSidebarOpen(o => !o)}
+        />
+
+        <div className="main">
+          <div className="card">
+
+            {/* Header */}
+            <div className="card-header">
+              <span className="card-title">Work Units</span>
+              <span className="date-badge">{state.date}</span>
+            </div>
+
+            {/* Total */}
+            <div className="total-wrap">
+              <div className="total-num">{fmt(totalUnits)}</div>
+              <div className="total-label">units today</div>
+            </div>
+
+            {/* Buttons */}
+            <div className="btn-row">
+              <button className="clk-btn btn-r" onClick={() => add('R')}>
+                <span className="btn-letter">R</span>
+                <span className="btn-name">Renewal</span>
+                <span className="btn-unit">1 unit</span>
+              </button>
+              <button className="clk-btn btn-f" onClick={() => add('F')}>
+                <span className="btn-letter">F</span>
+                <span className="btn-name">Other Call</span>
+                <span className="btn-unit">0.5 units</span>
+              </button>
+              <button className="clk-btn btn-t" onClick={() => add('T')}>
+                <span className="btn-letter">T</span>
+                <span className="btn-name">Task</span>
+                <span className="btn-unit">count only</span>
+              </button>
+            </div>
+
+            {/* Breakdown */}
+            <div className="breakdown">
+              <div className="bk-stat bk-r">
+                <div className="bk-count">{state.renewalCalls}</div>
+                <div className="bk-label">Renewal</div>
+              </div>
+              <div className="bk-sep">+</div>
+              <div className="bk-stat bk-f">
+                <div className="bk-count">{state.otherCalls}</div>
+                <div className="bk-label">Other</div>
+              </div>
+              <div className="bk-sep">=</div>
+              <div className="bk-stat bk-total">
+                <div className="bk-count">{totalCalls}</div>
+                <div className="bk-label">Calls</div>
+              </div>
+              <div className="bk-sep">·</div>
+              <div className="bk-stat bk-t">
+                <div className="bk-count">{state.taskCount}</div>
+                <div className="bk-label">Tasks</div>
+              </div>
+            </div>
+
+            {/* Sync */}
+            <SyncStrip onSyncComplete={handleSyncComplete} />
+
+            {/* Actions */}
+            <div className="actions">
+              <button className="act-btn" onClick={undo} disabled={!canUndo}>
+                Undo · Ctrl+Z
+              </button>
+              <button className="act-btn danger" onClick={reset}>
+                Reset day
+              </button>
+            </div>
+
+            {/* Hint */}
+            <div className="hint">
+              <kbd>R</kbd> <kbd>F</kbd> <kbd>T</kbd> · resets midnight CET
+            </div>
+
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
