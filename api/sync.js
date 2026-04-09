@@ -1,5 +1,8 @@
 // api/sync.js — queries Salesforce and returns R/F/T counts for today (CET)
+// plus per-day breakdowns for the full current week (Mon→today)
 import { getSession } from './me.js';
+
+const TZ = 'Europe/Madrid';
 
 export async function GET(req) {
   const session = getSession(req);
@@ -8,116 +11,202 @@ export async function GET(req) {
   }
 
   try {
-    const { start, end } = getCETDayBoundsUTC();
-    const userId = await getSFUserId(session);
+    const userId  = await getSFUserId(session);
+    const today   = getCETDayBounds();
+    const week    = getCETWeekBounds();
 
+    // Today's accurate counts (3 COUNT queries in parallel)
     const [renewalCalls, otherCalls, tasks] = await Promise.all([
-      queryCount(session, buildRenewalCallQuery(userId, start, end)),
-      queryCount(session, buildOtherCallQuery(userId, start, end)),
-      queryCount(session, buildTaskQuery(userId, start, end)),
+      queryCount(session, buildRenewalCallQuery(userId, today.cetDate)),
+      queryCount(session, buildOtherCallQuery(userId, today.cetDate)),
+      queryCount(session, buildTaskQuery(userId, today.startUTC, today.endUTC)),
     ]);
 
-    return Response.json({ renewalCalls, otherCalls, tasks, syncedAt: new Date().toISOString() });
+    // Weekly breakdown: 2 bulk record queries, grouped in JS
+    const weeklyData = await buildWeeklyData(session, userId, week, today.cetDate, renewalCalls, otherCalls, tasks);
+
+    return Response.json({
+      renewalCalls,
+      otherCalls,
+      tasks,
+      week: weeklyData,
+      syncedAt: new Date().toISOString(),
+    });
   } catch (err) {
     console.error('SF sync error:', err);
     return Response.json({ error: 'Sync failed' }, { status: 502 });
   }
 }
 
-// ── SOQL builders ──────────────────────────────────────────────────────────
+// ── SOQL builders (today) ──────────────────────────────────────────────────
 
-function buildRenewalCallQuery(userId, start, end) {
-  // Renewal calls: Type=Call, Status=Completed, CallDisposition starts with "Completed",
-  // Subject contains "Renewal" or starts with "read.ai"
+function buildRenewalCallQuery(userId, cetDate) {
   return `SELECT COUNT() FROM Task
     WHERE OwnerId = '${userId}'
     AND Type = 'Call'
     AND Status = 'Completed'
     AND CallDisposition LIKE 'Completed%'
-    AND ActivityDate = TODAY
+    AND ActivityDate = ${cetDate}
     AND (Subject LIKE '%Renewal%' OR Subject LIKE 'read.ai%')`;
 }
 
-function buildOtherCallQuery(userId, start, end) {
-  // Other calls: same as above but NOT renewal subjects
+function buildOtherCallQuery(userId, cetDate) {
   return `SELECT COUNT() FROM Task
     WHERE OwnerId = '${userId}'
     AND Type = 'Call'
     AND Status = 'Completed'
     AND CallDisposition LIKE 'Completed%'
-    AND ActivityDate = TODAY
+    AND ActivityDate = ${cetDate}
     AND (NOT Subject LIKE '%Renewal%')
     AND (NOT Subject LIKE 'read.ai%')`;
 }
 
-function buildTaskQuery(userId, start, end) {
-  // Tasks: only genuine task subtypes (excludes auto-logged emails/calls),
-  // Status=Completed, not Task_Not_Relevant__c,
-  // completed within today CET (using UTC bounds on CompletedDateTime)
+function buildTaskQuery(userId, startUTC, endUTC) {
   return `SELECT COUNT() FROM Task
     WHERE OwnerId = '${userId}'
     AND TaskSubtype = 'Task'
     AND Status = 'Completed'
     AND Task_Not_Relevant__c = false
-    AND CompletedDateTime >= ${start}
-    AND CompletedDateTime < ${end}`;
+    AND CompletedDateTime >= ${startUTC}
+    AND CompletedDateTime < ${endUTC}`;
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────
+// ── Weekly breakdown ───────────────────────────────────────────────────────
 
-// Returns ISO strings for 00:00 and 23:59:59 CET today, expressed in UTC
-// CET = UTC+1 standard, UTC+2 DST (Europe/Madrid)
-function getCETDayBoundsUTC() {
+async function buildWeeklyData(session, userId, week, todayCET, todayR, todayF, todayT) {
+  // Two bulk queries: one for calls (grouped by ActivityDate), one for tasks
+  const [calls, taskRecs] = await Promise.all([
+    queryRecords(session, `
+      SELECT Subject, ActivityDate FROM Task
+      WHERE OwnerId = '${userId}'
+      AND Type = 'Call'
+      AND Status = 'Completed'
+      AND CallDisposition LIKE 'Completed%'
+      AND ActivityDate >= ${week.mondayCET}
+      AND ActivityDate <= ${week.sundayCET}`),
+
+    queryRecords(session, `
+      SELECT CompletedDateTime FROM Task
+      WHERE OwnerId = '${userId}'
+      AND TaskSubtype = 'Task'
+      AND Status = 'Completed'
+      AND Task_Not_Relevant__c = false
+      AND CompletedDateTime >= ${week.startUTC}
+      AND CompletedDateTime < ${week.endUTC}`),
+  ]);
+
+  // Build per-day map
+  const byDay = {};
+
+  for (const call of calls) {
+    const d = call.ActivityDate;
+    if (!byDay[d]) byDay[d] = { units: 0, tasks: 0 };
+    const isRenewal = call.Subject &&
+      (call.Subject.includes('Renewal') || call.Subject.startsWith('read.ai'));
+    byDay[d].units += isRenewal ? 1 : 0.5;
+  }
+
+  for (const t of taskRecs) {
+    const d = new Intl.DateTimeFormat('en-CA', {
+      timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(new Date(t.CompletedDateTime));
+    if (!byDay[d]) byDay[d] = { units: 0, tasks: 0 };
+    byDay[d].tasks += 1;
+  }
+
+  // Override today with the accurate per-query counts (avoids double-counting edge cases)
+  byDay[todayCET] = {
+    units: todayR + todayF * 0.5,
+    tasks: todayT,
+  };
+
+  return byDay;
+}
+
+// ── Date helpers ───────────────────────────────────────────────────────────
+
+function getCETDayBounds() {
   const now = new Date();
-
-  // Determine today's date in CET
-  const cetDateStr = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Europe/Madrid',
-    year: 'numeric', month: '2-digit', day: '2-digit',
+  const cetDate = new Intl.DateTimeFormat('en-CA', {
+    timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit',
   }).format(now);
 
-  // Build midnight CET as a proper Date by parsing with offset
-  const cetMidnight = new Date(`${cetDateStr}T00:00:00`);
+  const offsetMs  = getCETOffsetMs(now);
+  const [y, m, d] = cetDate.split('-').map(Number);
+  const startUTC  = new Date(Date.UTC(y, m - 1, d) - offsetMs);
+  const endUTC    = new Date(startUTC.getTime() + 86400000);
 
-  // Get the UTC offset for Europe/Madrid at that instant
-  const offsetMs = getCETOffsetMs(cetMidnight);
-
-  const startUTC = new Date(cetMidnight.getTime() - offsetMs);
-  const endUTC   = new Date(startUTC.getTime() + 24 * 60 * 60 * 1000);
-
-  // SOQL datetime literals require format: 2026-04-09T00:00:00Z
   return {
-    start: startUTC.toISOString().slice(0, 19) + 'Z',
-    end:   endUTC.toISOString().slice(0, 19) + 'Z',
+    cetDate,
+    startUTC: startUTC.toISOString().slice(0, 19) + 'Z',
+    endUTC:   endUTC.toISOString().slice(0, 19) + 'Z',
+  };
+}
+
+function getCETWeekBounds() {
+  const now = new Date();
+  const todayCET = new Intl.DateTimeFormat('en-CA', {
+    timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(now);
+
+  const [y, m, d] = todayCET.split('-').map(Number);
+  // Compute Monday offset (getUTCDay on pure date avoids timezone ambiguity)
+  const dow          = new Date(Date.UTC(y, m - 1, d)).getUTCDay(); // 0=Sun
+  const mondayOffset = dow === 0 ? -6 : 1 - dow;
+  const sundayOffset = dow === 0 ? 0 : 7 - dow;
+
+  const mondayDate = new Date(Date.UTC(y, m - 1, d + mondayOffset));
+  const sundayDate = new Date(Date.UTC(y, m - 1, d + sundayOffset));
+
+  const mondayCET = mondayDate.toISOString().slice(0, 10);
+  const sundayCET = sundayDate.toISOString().slice(0, 10);
+
+  // UTC bounds: Mon 00:00 CET → Sun 23:59:59 CET (i.e. next Mon 00:00 CET)
+  const offsetMs = getCETOffsetMs(now);
+  const [my, mm, md] = mondayCET.split('-').map(Number);
+  const [sy, sm, sd] = sundayCET.split('-').map(Number);
+  const startUTC = new Date(Date.UTC(my, mm - 1, md) - offsetMs);
+  const endUTC   = new Date(Date.UTC(sy, sm - 1, sd + 1) - offsetMs); // next Mon 00:00
+
+  return {
+    mondayCET,
+    sundayCET,
+    startUTC: startUTC.toISOString().slice(0, 19) + 'Z',
+    endUTC:   endUTC.toISOString().slice(0, 19) + 'Z',
   };
 }
 
 function getCETOffsetMs(date) {
-  // Measure the offset by comparing UTC parts to Europe/Madrid parts
-  const utcStr  = date.toLocaleString('en-US', { timeZone: 'UTC' });
-  const cetStr  = date.toLocaleString('en-US', { timeZone: 'Europe/Madrid' });
-  return (new Date(cetStr) - new Date(utcStr));
+  const utcStr = date.toLocaleString('en-US', { timeZone: 'UTC' });
+  const cetStr = date.toLocaleString('en-US', { timeZone: TZ });
+  return new Date(cetStr) - new Date(utcStr);
 }
 
+// ── SF REST helpers ────────────────────────────────────────────────────────
+
 async function getSFUserId(session) {
-  const res = await fetch(`${session.instanceUrl}/services/oauth2/userinfo`, {
+  const res  = await fetch(`${session.instanceUrl}/services/oauth2/userinfo`, {
     headers: { Authorization: `Bearer ${session.accessToken}` },
   });
   const info = await res.json();
-  // SF user_id is in format "https://.../.../005Ih..." — we want just the ID
-  const id = info.user_id || info.sub;
-  return id.split('/').pop();
+  return (info.user_id || info.sub).split('/').pop();
 }
 
 async function queryCount(session, soql) {
+  const data = await sfQuery(session, soql);
+  return data.totalSize ?? 0;
+}
+
+async function queryRecords(session, soql) {
+  const data = await sfQuery(session, soql);
+  return data.records ?? [];
+}
+
+async function sfQuery(session, soql) {
   const url = `${session.instanceUrl}/services/data/v63.0/query?q=${encodeURIComponent(soql)}`;
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${session.accessToken}` },
   });
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`SOQL failed: ${err}`);
-  }
-  const data = await res.json();
-  return data.totalSize ?? 0;
+  if (!res.ok) throw new Error(`SOQL failed (${res.status}): ${await res.text()}`);
+  return res.json();
 }

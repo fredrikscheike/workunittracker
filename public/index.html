@@ -603,8 +603,17 @@
       saveDay(next); setState(next);
     }
 
-    // Overwrite local counts with SF data
+    // Overwrite local counts with SF data + backfill weekly history
     const handleSyncComplete = useCallback((data) => {
+      // Write all week days returned by SF into localStorage history
+      if (data.week) {
+        const hist = loadHist();
+        Object.entries(data.week).forEach(([date, vals]) => {
+          hist[date] = { units: vals.units ?? 0, tasks: vals.tasks ?? 0 };
+        });
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(hist));
+      }
+
       setState(prev => {
         const next = {
           ...prev,
